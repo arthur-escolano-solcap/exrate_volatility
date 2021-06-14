@@ -1,0 +1,148 @@
+---
+title: "Exrate_volatility"
+author: "Solaris Capital"
+date: "14/06/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+def.chunk.hook <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options){
+  x <- def.chunk.hook(x, options)
+  ifelse(options$size != "normalise", paste0("\\", options$size, "\n\n", x, "\n\n \\normalsize"), x)
+}) 
+```
+
+```{r, echo=F, eval=T, results='asis', fig.width=8, fig.height=4, fig.align='center', out.width="1\\linewidth", warning=FALSE, message=FALSE, size='tiny'}
+
+## Pacotes utilizados
+library(reshape2)
+library(tidyverse)
+library(lubridate)
+library(zoo)
+library(scales)
+library(timetk)
+library(knitr)
+library(ecoseries)
+library(readr)
+library(xts)
+library(ggplot2)
+library(scales)
+library(png)
+library(grid)
+library(seasonal) 
+library(forecast)
+library(readxl)
+library(kableExtra)
+library(gmodels)
+library(rapportools)
+library(TTR)
+library(caTools)
+library(tidyverse)
+library(sidrar)
+library(writexl)
+library(Quandl)
+library(fredr)
+library(dplyr)
+library(lubridate)
+library(ipeadatar)
+library(qcc)
+
+Quandl.api_key('_CttgEjLzAUcRMgYv1kT')
+fredr_set_key("c43c3db40eae3bc49e8a0e90d489449f")
+
+Sys.setenv(X13_PATH ="C:/Users/Solaris/Documents/Container/exchange_rate_forecasting/x13ashtml")
+
+library(seasonal)
+
+checkX13()
+
+```
+
+
+```{r}
+
+### Série de câmbio nominal: 1 - Taxa de câmbio - Livre - Dólar americano (venda) - diario
+
+cambio = Quandl('BCB/1', order='asc', start_date = '2007-05-16') %>%
+  `colnames<-`(c('date', 'cambio'))
+
+cambiosd <- cambio[,2]
+
+
+```
+
+
+```{r}
+
+yt <- diff(log(cambiosd))
+ybar <- mean(yt)
+
+cambiosd.ma21 <- SMA((yt-ybar)^2,n=21)
+cambiosd.ma63 <- SMA((yt-ybar)^2,n=63)
+cambiosd.ewma <- ewma((yt-ybar)^2,lambda=.94) # note: in EWMA lambda is actually 1-lambda
+
+
+
+```
+
+```{r}
+
+par(mfrow=c(2,2), cex=0.6, mar=c(2,2,3,1))
+plot((yt-ybar)^2, type="l", main="Cambio squared demeaned weekly log return")
+plot(cambiosd.ma21, type="l", main="4 week moving average")
+plot(cambiosd.ma63, type="l", main="24 week moving average")
+plot(cambiosd.ewma, type="l", main="exponentially weighted moving average")
+
+
+```
+
+
+```{r}
+
+  # fcast_b_eua10y
+fcast_cambiovol <- nnetar(ts(cambiosd.ewma[["statistics"]]), lambda=0)
+
+sim1 <- ts(matrix(0, nrow=63L, ncol=9L),
+  start=end(ts(cambiosd.ewma[["statistics"]]))[1L]+1L)
+for(k in seq(9))
+  sim1[,k] <- simulate(fcast_cambiovol, nsim=63L)
+
+sim1 =
+  sim1 %>%
+  as_tibble() %>%
+  mutate(fcast_cambiovol = rowMeans(sim1)) %>%
+  select(fcast_cambiovol)
+
+plot(sim1$fcast_cambiovol, type="l", main="exponentially weighted moving average")
+
+```
+
+```{r}
+library(fGarch)
+garchmodel1 <- garchFit( ~ garch(1,1), data=coredata(yt), trace=FALSE) 
+summary(garchmodel1)
+
+
+
+```
+
+```{r}
+t <- index(yt)
+var5.ewma  <- ybar - 1.645 * sqrt(cambiosd.ewma[["statistics"]])
+var5.garch <- ybar - 1.645 * garchmodel1@sigma.t
+var1.ewma  <- ybar - 2.326 * sqrt(cambiosd.ewma[["statistics"]])
+var1.garch <- ybar - 2.326 * garchmodel1@sigma.t
+
+par(mfrow=c(2,2), cex=0.6, mar=c(2,2,3,1))
+plot(t, yt,type="l", main ="5% VaR EWMA")
+lines(t, var5.ewma, col = "blue")
+plot(t, yt,type="l", main ="5% VaR GARCH(1,1)")
+lines(t, var5.garch, col ="blue")
+plot(t, yt,type="l", main ="1% VaR EWMA")
+lines(t, var1.ewma, col = "red")
+plot(t, yt, type="l", main ="1% VaR GARCH(1,1)")
+lines(t, var1.garch, col ="red")
+```
+
